@@ -1,0 +1,262 @@
+---
+title: "Rocket League Sideswipe Mystery Items"
+author: "Toby Hayward"
+date: "2022-10-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+# Summary
+
+This is a document outlining the 91 mystery item crates that I opened. I want to use this data to estimate the probabilities of each item and provide visualisations to convey these findings.
+
+
+```{r data}
+data = read_csv('data/rlssmysteryboxes.csv')
+
+```
+
+A brief investigation to make sure that I wasn't too asleep when I collected this data.
+
+```{r data quality check 1}
+data %>% 
+  ggplot(aes(x = quality, y = quality.colour)) +
+  geom_tile()
+```
+
+Okay looks like I got the qualities right every time. 
+
+```{r data quality check 2}
+items = data %>% 
+  group_by(item, quality) %>% 
+  count() %>% 
+  pull(item)
+
+items
+
+length(items) / length(unique(items))
+
+```
+
+This gives me reason to assume that I didn't miscategorise any item.\
+I'm pretty satisfied with the quality at this point, I'm just going to tidy the data a bit.
+
+```{r data tidy}
+data.tidy = data %>%
+  mutate(
+    # Reorder the qualities. This link https://theglobalgaming.com/rocket-league/rarity-chart#:~:text=Common%3A%20Complete,are%20extremely%20rare.
+    quality = factor(toupper(quality), levels = toupper(c('common', 'uncommon', 'rare', 'very rare', 'import', 'exotic', 'black market'))),
+    item = toupper(item)
+  )
+
+data.tidy
+
+
+```
+
+
+Now for some questions. The questions I am interested in are:
+
+* What is the expected return on value for a mystery box purchase?
+* What are the estimated probabilities of each quality?
+* What **item type** is the most frequent?
+* How common are **coloured** items?
+* What is the distribution of item types for each quality?
+
+Let's start with the second question since we'll use it to aid the first: *What is the estimated probablilities of each quality?*
+
+```{r probabilities}
+# Get the colours of the qualities
+quality.colours = data.tidy %>% 
+  group_by(quality) %>% 
+  slice_head() %>% 
+  # Conveniently in the correct order. It seems like the function did this intentionally judging by the order of box.price.
+  pull(quality.colour)
+
+
+# Those colours are wack. Let's choose nice ones from http://www.stat.columbia.edu/~tzheng/files/Rcolor.pdf
+
+quality.colours.decent = c(
+  'grey90', # can't deny it
+  'cyan2',
+  'dodgerblue',
+  'darkorchid1',
+  'red',
+  'gold',
+  'deeppink2'
+)
+
+# This is better
+
+data.tidy %>% 
+  ggplot(aes(x = quality, fill = quality)) +
+  geom_bar(col = 'black') +
+  scale_fill_manual(values = quality.colours.decent) +
+  theme_dark() +
+  labs(title = 'Frequencies of Item Type',
+       subtitle = paste('From a sample of', nrow(data), 'Mystery Items'),
+       caption = 'Taken on 30/10/2022',
+       x = 'Item Quality', y = 'Frequency') +
+  theme(plot.title = element_text(size = 30, face = 2, hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        legend.position = 'none',
+        axis.line = element_line(colour = 'black'))
+```
+
+```{r probabilities 2}
+
+# Now for the official proportions
+
+frequencies = data.tidy$quality %>% table()
+(probabilities.quality = frequencies / sum(frequencies))
+
+data.tidy %>% 
+  group_by(quality) %>% 
+  summarise(p = n() / nrow(data)) %>% 
+  ggplot(aes(x = quality, fill = quality, y = p * 100)) +
+  geom_col(col = 'black') +
+  scale_fill_manual(values = quality.colours.decent) +
+  theme_dark() +
+  labs(title = 'Probabilities of Item Type',
+       subtitle = paste('From a sample of', nrow(data), 'Mystery Items'),
+       caption = 'Taken on 30/10/2022',
+       x = 'Item Quality', y = 'Probability %') +
+  theme(plot.title = element_text(size = 30, face = 2, hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        legend.position = 'none',
+        axis.line = element_line(colour = 'black')) +
+  scale_y_continuous(breaks = seq(0, 40, 10), labels = c(paste0(seq(0, 40, 10), '%')))
+```
+
+
+
+Judging by the *current* item shop. It appears that each quality has the following value;
+
+* Common ~ No Value
+* Uncommon Topper ~ 400 SP
+* Rare Banner ~ 800 SP
+* Very Rare Boost ~ 1200 SP 
+* Import Boost ~ 1800 SP
+* Exotic Wheel ~ 2400 SP
+* Black Market Car Body ~ 3200 SP
+
+And these videos [1](https://www.youtube.com/watch?v=aIi6ypdDf-E) [2](https://www.youtube.com/watch?v=6gic-dX-EwY). 
+
+* Common ~ No Value
+* Uncommon Banner ~ 400 SP
+* Uncommon Decal ~ 400 SP
+* Rare Decal ~ 800 SP
+* Rare Title ~ 800 SP
+* Very Rare Boost ~ 1200 SP 
+* Very Rare Wheel ~ 1200 SP 
+* Import Boost ~ 1800 SP
+* Exotic Wheel ~ 2400 SP
+* Exotic Car Body ~ 2400 SP
+* Black Market Car Body ~ 3200 SP
+* Black Market Goal Explosion ~ 3200 SP
+
+Because we can't let items have no value, let's just assume that *COMMON* items have **200** SP in value. Hence it seems like the estimated values follow a trend shown below. 
+
+```{r quality values, message = FALSE}
+data.quality.value = tibble(quality = factor(levels(data.tidy$quality), levels = levels(data.tidy$quality)),
+       value = c(200, 400, 800, 1200, 1800, 2400, 3200))
+data.quality.value
+
+data.quality.value %>% 
+  ggplot(aes(x = quality, y = value)) +
+  geom_point(col = quality.colours.decent) +
+  geom_smooth(aes(x = 1:7), col = alpha('red', 0.2), alpha = 0.2, se = F) +
+  geom_point(col = quality.colours.decent) +
+  theme_bw() +
+  labs(title = 'Quality Value',
+       subtitle = 'As Estimated by the Item Shop on 3 Occasions',
+       x = 'Quality', y = 'Value (SP)')
+
+```
+
+
+
+Therefore now we can use this data to answer the question: *What is the expected return on value for a mystery box purchase?*
+
+```{r expected return}
+(data.quality.value.prob = data.quality.value %>% 
+  left_join(tibble(
+    quality = names(probabilities.quality),
+    prob = probabilities.quality %>% as.numeric()
+  ), by = 'quality') %>% 
+  mutate(exp_value = value * prob)) 
+
+data.quality.value.prob %>% 
+  pull(exp_value) %>% sum()
+
+```
+
+
+Therefore, you are always likely to gain value when opening a mystery box. This raises an important question though, *How likely?*... \
+We can answer this in two ways: 
+
+1. Approximate the distribution and calculate it's probability (Long and boring)
+2. Just use the data and assume it's representative and sufficient (which it very may well be).
+
+
+```{r how likely lol p1}
+(data.tidy2 = data.tidy %>% 
+  left_join(data.quality.value))
+
+data.tidy2 %>% 
+  ggplot(aes(x = value)) +
+  geom_bar() +
+  theme_bw()
+
+data.tidy2 %>% 
+  ggplot(aes(x = value)) +
+  geom_density() +
+  theme_bw()
+
+data.tidy2 %>% 
+  ggplot(aes(x = log(value))) +
+  geom_bar() +
+  theme_bw()
+
+data.tidy2 %>% 
+  ggplot(aes(x = log(value))) +
+  geom_density() +
+  theme_bw()
+
+
+```
+
+
+This looks like a *Quasi-Poisson* Distribution. We can approximate it's parameters using *Maximum Likelihood.* \
+Because Quasi-Poisson does not have a *Probability-Density-Function*, instead we can transform the data 
+
+
+```{r mle}
+# Screw that! For now...
+plot(0:12, dpois(0:12, 6))
+
+```
+
+
+The second way I can calculate it is just by estimating the probability of getting something below 500 SP. 
+
+```{r crude way! use the data dummy}
+(probability.profit = (data.tidy2$value[data.tidy2$value > 500] %>% length()) / length(data.tidy2$value))
+
+```
+
+My data claims that if you open a crate, you have a `r round(probability.profit, 3) * 100`% chance of getting an item that is worth more than the investment into the crate.
+
+
+
+
+
+
+
+
+
+
